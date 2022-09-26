@@ -61,12 +61,13 @@ lazy val noPublishSettings = Seq(
   publishTo := None
 )
 
-val munit      = "org.scalameta"          %% "munit"       % versions.munit     % "test"
+val munit      = Def.setting("org.scalameta"          %%% "munit"       % versions.munit     % "test")
 val jTidy      = "net.sf.jtidy"           %  "jtidy"       % versions.jTidy     % "test"
 
-val catsEffect = "org.typelevel"          %% "cats-effect"         % versions.catsEffect
-val fs2IO      = "co.fs2"                 %% "fs2-io"              % versions.fs2
-val munitCE3   = "org.typelevel"          %% "munit-cats-effect-3" % versions.munitCE3 % "test"
+val catsCore   = Def.setting("org.typelevel"          %%% "cats-core"           % versions.catsCore)
+val catsEffect = Def.setting("org.typelevel"          %%% "cats-effect"         % versions.catsEffect)
+val fs2IO      = Def.setting("co.fs2"                 %%% "fs2-io"              % versions.fs2)
+val munitCE3   = Def.setting("org.typelevel"          %%% "munit-cats-effect"   % versions.munitCE3 % "test")
 
 val fop        = "org.apache.xmlgraphics" %  "fop"         % versions.fop
 val http4s     = Seq(
@@ -75,7 +76,7 @@ val http4s     = Seq(
                  )
 
 lazy val root = project.in(file("."))
-  .aggregate(core.js, core.jvm, pdf, io, preview, plugin)
+  .aggregate(core.js, core.jvm, pdf, io.jvm, io.native, preview, plugin)
   .settings(basicSettings)
   .settings(noPublishSettings)
   .enablePlugins(ScalaUnidocPlugin)
@@ -96,7 +97,7 @@ lazy val docs = project.in(file("docs"))
     Laika / target := baseDirectory.value / "target"
   )
 
-lazy val core = crossProject(JSPlatform, JVMPlatform)
+lazy val core = crossProject(JSPlatform, JVMPlatform, NativePlatform)
   .withoutSuffixFor(JVMPlatform)
   .crossType(CrossType.Full)
   .in(file("core"))
@@ -104,10 +105,7 @@ lazy val core = crossProject(JSPlatform, JVMPlatform)
   .settings(publishSettings)
   .settings(
     name := "laika-core",
-    libraryDependencies ++= Seq(
-      "org.scalameta" %%% "munit"     % versions.munit     % "test",
-      "org.typelevel" %%% "cats-core" % versions.catsCore
-    )
+    libraryDependencies ++= Seq(munit.value, catsCore.value)
   )
   .jvmSettings(
     libraryDependencies += jTidy, 
@@ -117,36 +115,50 @@ lazy val core = crossProject(JSPlatform, JVMPlatform)
     Test / scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule) },
     crossScalaVersions := Seq(versions.scala2_12, versions.scala2_13, versions.scala3)
   )
+  .nativeSettings(
+    libraryDependencies += Seq(
+      "io.github.cquiroz" %%% "scala-java-time" % "2.4.0",
+      "io.github.cquiroz" %%% "scala-java-locales" % "1.4.1"
+    ),
+    Test / nativeConfig ~= { _.withEmbedResources(true) },
+    crossScalaVersions := Seq(versions.scala2_12, versions.scala2_13, versions.scala3)
+  )
 
-lazy val io = project.in(file("io"))
-  .dependsOn(core.jvm % "compile->compile;test->test")
+lazy val io = crossProject(JVMPlatform, NativePlatform)
+  .withoutSuffixFor(JVMPlatform)
+  .crossType(CrossType.Pure)
+  .in(file("io"))
+  .dependsOn(core % "compile->compile;test->test")
   .settings(moduleSettings)
   .settings(publishSettings)
   .settings(
     name := "laika-io",
-    libraryDependencies ++= Seq(catsEffect, fs2IO, munit, munitCE3)
+    libraryDependencies ++= Seq(catsEffect.value, fs2IO.value, munit.value, munitCE3.value)
   )
-  
+  .nativeSettings(
+    nativeConfig ~= { _.withEmbedResources(true) }
+  )
+
 lazy val pdf = project.in(file("pdf"))
-  .dependsOn(core.jvm % "compile->compile;test->test", io % "compile->compile;test->test")
+  .dependsOn(core.jvm % "compile->compile;test->test", io.jvm % "compile->compile;test->test")
   .settings(moduleSettings)
   .settings(publishSettings)
   .settings(
     name := "laika-pdf",
-    libraryDependencies ++= Seq(fop, munit)
+    libraryDependencies ++= Seq(fop, munit.value)
   )
 
 lazy val preview = project.in(file("preview"))
-  .dependsOn(core.jvm, io % "compile->compile;test->test", pdf)
+  .dependsOn(core.jvm, io.jvm % "compile->compile;test->test", pdf)
   .settings(moduleSettings)
   .settings(publishSettings)
   .settings(
     name := "laika-preview",
-    libraryDependencies ++= (http4s :+ munit)
+    libraryDependencies ++= (http4s :+ munit.value)
   )
 
 lazy val plugin = project.in(file("sbt"))
-  .dependsOn(core.jvm, io, pdf, preview)
+  .dependsOn(core.jvm, io.jvm, pdf, preview)
   .enablePlugins(SbtPlugin)
   .settings(basicSettings)
   .settings(publishSettings)
